@@ -62,15 +62,15 @@ from segmentation.unet.models.model import *
 
 ############################################################################## define augument
 parser = argparse.ArgumentParser(description="arg parser")
-parser.add_argument('--model', type=str, default='efficientnet-b5', required=False, help='specify the backbone model')
+parser.add_argument('--model', type=str, default='efficientnet-b3', required=False, help='specify the backbone model')
 parser.add_argument('--model_type', type=str, default='unet', required=False, help='specify the model')
 parser.add_argument('--optimizer', type=str, default='Ranger', required=False, help='specify the optimizer')
 parser.add_argument("--lr_scheduler", type=str, default='WarmRestart', required=False, help="specify the lr scheduler")
 parser.add_argument("--lr", type=int, default=2e-3, required=False, help="specify the initial learning rate for training")
 parser.add_argument("--batch_size", type=int, default=2, required=False, help="specify the batch size for training")
-parser.add_argument("--valid_batch_size", type=int, default=1, required=False, help="specify the batch size for validating")
+parser.add_argument("--valid_batch_size", type=int, default=2, required=False, help="specify the batch size for validating")
 parser.add_argument("--num_epoch", type=int, default=15, required=False, help="specify the total epoch")
-parser.add_argument("--accumulation_steps", type=int, default=2, required=False, help="specify the accumulation steps")
+parser.add_argument("--accumulation_steps", type=int, default=8, required=False, help="specify the accumulation steps")
 parser.add_argument("--start_epoch", type=int, default=0, required=False, help="specify the start epoch for continue training")
 parser.add_argument("--train_data_folder", type=str, default="/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE", \
     required=False, help="specify the folder for training data")
@@ -379,11 +379,11 @@ def training(model_name,
     log.write('   batch_size=%d,  accumulation_steps=%d\n'%(batch_size, accumulation_steps))
     log.write('   experiment  = %s\n' % str(__file__.split('/')[-2:]))
     
-    valid_loss = np.zeros(17,np.float32)
-    train_loss = np.zeros( 6,np.float32)
+    valid_loss = np.zeros(3, np.float32)
+    train_loss = np.zeros(3, np.float32)
     valid_metric_optimal = np.inf
     eval_step = len(train_dataloader) # or len(train_dataloader) 
-    log_step = 100
+    log_step = 10
     eval_count = 0
     
     # define tensorboard writer and timer
@@ -398,7 +398,7 @@ def training(model_name,
         
         # update lr and start from start_epoch  
         if (not lr_scheduler_each_iter):
-            if epoch < 6:
+            if epoch < 60:
                 if epoch != 0:
                     scheduler.step()
                     scheduler = warm_restart(scheduler, T_mult=2) 
@@ -423,7 +423,7 @@ def training(model_name,
         torch.cuda.empty_cache()
         optimizer.zero_grad()
         
-        for tr_batch_i, (X, truth_mask, infor) in enumerate(train_dataloader):
+        for tr_batch_i, (X, truth_mask) in enumerate(train_dataloader):
             
             if (lr_scheduler_each_iter):
                 scheduler.step(tr_batch_i)
@@ -433,7 +433,7 @@ def training(model_name,
             X = X.cuda().float()  
             truth_mask  = truth_mask.cuda()
             prediction = model(X)  # [N, C, H, W]
-            loss = criterion(prediction, truth_mask, weight=None)
+            loss = criterion(prediction, truth_mask)
 
             with amp.scale_loss(loss/accumulation_steps, optimizer) as scaled_loss:
                 scaled_loss.backward()
@@ -448,14 +448,17 @@ def training(model_name,
                 writer.add_scalar('train_loss_' + str(fold), loss.item(), (epoch-1)*len(train_dataloader)*batch_size+tr_batch_i*batch_size)
             
             # print statistics  --------
-            probability_mask  = torch.sigmoid(prediction)
-            fscore_positive = metric(probability_mask, truth_mask)
-            fscore_negative = metric(probability_mask, torch.ones_like(truth_mask) - truth_mask)
+            # probability_mask  = torch.sigmoid(prediction)
+            probability_mask  = prediction
+            mask_positive = torch.where(truth_mask > 0, torch.ones_like(truth_mask), truth_mask)
+            mask_negative = torch.ones_like(truth_mask) - truth_mask
+            fscore_positive = metric(probability_mask, mask_positive)
+            fscore_negative = metric(probability_mask, mask_negative)
             
             l = np.array([loss.item() * batch_size, fscore_positive, fscore_negative])
             n = np.array([batch_size])
-            sum_train_loss += l
-            sum_train      += n
+            sum_train_loss = sum_train_loss + l
+            sum_train      = sum_train + n
             
             # log for training
             if (tr_batch_i+1) % log_step == 0:  
@@ -470,7 +473,7 @@ def training(model_name,
                 
                 eval_count += 1
                 
-                valid_loss = np.zeros(17, np.float32)
+                valid_loss = np.zeros(3, np.float32)
                 valid_num  = np.zeros_like(valid_loss)
                 valid_metric = []
                 
@@ -478,7 +481,7 @@ def training(model_name,
                     
                     torch.cuda.empty_cache()
 
-                    for val_batch_i, (X, truth_mask, infor) in enumerate(valid_dataloader):
+                    for val_batch_i, (X, truth_mask) in enumerate(valid_dataloader):
 
                         model.eval()
 
@@ -486,21 +489,23 @@ def training(model_name,
                         truth_mask  = truth_mask.cuda()
                         prediction = model(X)  # [N, C, H, W]
 
-                        #SoftDiceLoss_binary()(prediction, truth_mask)
-                        loss = criterion(prediction, truth_mask, weight=None)
+                        loss = criterion(prediction, truth_mask)
                             
                         writer.add_scalar('val_loss_' + str(fold), loss.item(), (eval_count-1)*len(valid_dataloader)*valid_batch_size+val_batch_i*valid_batch_size)
                         
                         # print statistics  --------
-                        probability_mask  = torch.sigmoid(prediction)
-                        fscore_positive = metric(probability_mask, truth_mask)
-                        fscore_negative = metric(probability_mask, torch.ones_like(truth_mask) - truth_mask)
+                        # probability_mask  = torch.sigmoid(prediction)
+                        probability_mask  = prediction
+                        mask_positive = torch.where(truth_mask > 0, torch.ones_like(truth_mask), truth_mask)
+                        mask_negative = torch.ones_like(truth_mask) - truth_mask
+                        fscore_positive = metric(probability_mask, mask_positive)
+                        fscore_negative = metric(probability_mask, mask_negative)
 
                         #---
                         l = np.array([loss.item()*valid_batch_size, fscore_positive, fscore_negative])
                         n = np.array([valid_batch_size])
-                        valid_loss += l
-                        valid_num  += n
+                        valid_loss = valid_loss + l
+                        valid_num  = valid_num + n
                         
                     valid_loss = valid_loss / valid_num
                     

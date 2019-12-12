@@ -1,4 +1,5 @@
 import torch.nn.functional as F
+from . import functions as Func
 import torch.nn as nn
 import numpy as np
 import torch
@@ -123,7 +124,7 @@ class JaccardLoss(nn.Module):
         self.eps = eps
 
     def forward(self, y_pr, y_gt):
-        return 1 - F.jaccard(y_pr, y_gt, eps=self.eps, threshold=None, activation=self.activation)
+        return 1 - Func.jaccard(y_pr, y_gt, eps=self.eps, threshold=None, activation=self.activation)
 
 
 class DiceLoss(nn.Module):
@@ -135,7 +136,7 @@ class DiceLoss(nn.Module):
         self.eps = eps
 
     def forward(self, y_pr, y_gt):
-        return 1 - F.f_score(y_pr, y_gt, beta=1., eps=self.eps, threshold=None, activation=self.activation)
+        return 1 - Func.f_score(y_pr, y_gt, beta=1., eps=self.eps, threshold=None, activation=self.activation)
 
 
 class BCEJaccardLoss(JaccardLoss):

@@ -111,13 +111,17 @@ class URESDataset(Dataset):
         image = cv2.imread(self.data_dir + '/%s/%s.png'%(folder,image_id), cv2.IMREAD_COLOR)
 
         if self.mode == 'train':
-            mask = cv2.imread(self.data_dir + '/labels/%s/%s.tiff'%(folder,image_id), cv2.IMREAD_UNCHANGED)
+            # mask = cv2.imread(self.data_dir + '/labels/%s/%s.tiff'%(folder, image_id), cv2.IMREAD_UNCHANGED)
+            mask = cv2.imread(self.data_dir + '/labels/%s/%s.tiff'%(folder, image_id), 0)
         else:
             mask = np.zeros((self.size[0], self.size[1], 1), np.uint8)
 
         image = cv2.resize(image, dsize=self.size, interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, dsize=self.size, interpolation=cv2.INTER_LINEAR)
+        # mask = np.where(mask > 1, 1)
+        # mask = 1 - mask
         mask  = 1 - mask.astype(np.float32)/255
+        # print(mask.shape)
         
         info = image_id
         
@@ -179,6 +183,7 @@ def null_collate(batch):
     truth_mask  = []
     for b in range(batch_size):
         input.append(batch[b][0])
+        # print(batch[b][1].shape)
         truth_mask.append(batch[b][1])
 
     input = np.stack(input)
