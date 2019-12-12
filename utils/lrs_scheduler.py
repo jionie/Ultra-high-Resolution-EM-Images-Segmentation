@@ -20,6 +20,17 @@ import math
 from torch.optim.optimizer import Optimizer
 import torch
 
+def CosineAnnealingWarmUpRestarts(epoch, T_0, T_warmup=0, gamma=1.,):
+    stage = epoch//T_0
+    max_lr = gamma**(stage)
+    res = epoch  - stage*T_0
+    if epoch < 0:
+        return 1
+    elif res <= T_warmup:
+        return ((0.95/T_warmup)*res+0.05)*max_lr
+    else:
+        return (0.05*max_lr + 0.95*max_lr * (1 + math.cos(math.pi * (res-T_warmup)/(T_0-T_warmup))) / 2)
+
 class WarmRestart(lr_scheduler.CosineAnnealingLR):
     """This class implements Stochastic Gradient Descent with Warm Restarts(SGDR): https://arxiv.org/abs/1608.03983.
     

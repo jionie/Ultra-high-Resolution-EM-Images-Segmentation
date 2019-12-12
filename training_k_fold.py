@@ -64,13 +64,13 @@ from segmentation.unet.models.model import *
 parser = argparse.ArgumentParser(description="arg parser")
 parser.add_argument('--model', type=str, default='efficientnet-b3', required=False, help='specify the backbone model')
 parser.add_argument('--model_type', type=str, default='unet', required=False, help='specify the model')
-parser.add_argument('--optimizer', type=str, default='Ranger', required=False, help='specify the optimizer')
+parser.add_argument('--optimizer', type=str, default='Adam', required=False, help='specify the optimizer')
 parser.add_argument("--lr_scheduler", type=str, default='WarmRestart', required=False, help="specify the lr scheduler")
 parser.add_argument("--lr", type=int, default=2e-3, required=False, help="specify the initial learning rate for training")
 parser.add_argument("--batch_size", type=int, default=2, required=False, help="specify the batch size for training")
 parser.add_argument("--valid_batch_size", type=int, default=2, required=False, help="specify the batch size for validating")
-parser.add_argument("--num_epoch", type=int, default=15, required=False, help="specify the total epoch")
-parser.add_argument("--accumulation_steps", type=int, default=8, required=False, help="specify the accumulation steps")
+parser.add_argument("--num_epoch", type=int, default=1000, required=False, help="specify the total epoch")
+parser.add_argument("--accumulation_steps", type=int, default=12, required=False, help="specify the accumulation steps")
 parser.add_argument("--start_epoch", type=int, default=0, required=False, help="specify the start epoch for continue training")
 parser.add_argument("--train_data_folder", type=str, default="/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE", \
     required=False, help="specify the folder for training data")
@@ -112,22 +112,22 @@ def transform_train(image, mask, infor):
         image = albumentations.HorizontalFlip(p=1)(image=image)['image']
         mask = albumentations.HorizontalFlip(p=1)(image=mask)['image']
 
-    if random.random() < 0.5:
+    # if random.random() < 0.5:
         
-        image = albumentations.OneOf([
-            albumentations.RandomGamma(gamma_limit=(60, 120), p=0.1),
-            albumentations.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.1),
-            albumentations.CLAHE(clip_limit=4.0, tile_grid_size=(4, 4), p=0.1),
-        ])(image=image)['image']
+    #     image = albumentations.OneOf([
+    #         albumentations.RandomGamma(gamma_limit=(60, 120), p=0.1),
+    #         albumentations.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.1),
+    #         albumentations.CLAHE(clip_limit=4.0, tile_grid_size=(4, 4), p=0.1),
+    #     ])(image=image)['image']
     
-    if random.random() < 0.5:  
+    if random.random() < 0.25:  
         image = albumentations.OneOf([
             albumentations.Blur(blur_limit=4, p=1),
             albumentations.MotionBlur(blur_limit=4, p=1),
             albumentations.MedianBlur(blur_limit=4, p=1)
         ], p=0.5)(image=image)['image']
 
-    if random.random() < 0.5:
+    if random.random() < 0.25:
         image = albumentations.Cutout(num_holes=2, max_h_size=8, max_w_size=8, p=1)(image=image)['image']
         mask = albumentations.Cutout(num_holes=2, max_h_size=8, max_w_size=8, p=1)(image=mask)['image']
         
@@ -139,21 +139,19 @@ def transform_train(image, mask, infor):
         image = albumentations.Transpose(p=1)(image=image)['image']
         mask = albumentations.Transpose(p=1)(image=mask)['image']
     
-    if random.random() < 0.5:
-        image = albumentations.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.15, rotate_limit=45, p=1)(image=image)['image']
-        mask = albumentations.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.15, rotate_limit=45, p=1)(image=mask)['image']
-    
-    # no normalization for now
-    # image = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
-    image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
+    # if random.random() < 0.5:
+    #     image = albumentations.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.15, rotate_limit=45, p=1)(image=image)['image']
+    #     mask = albumentations.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.15, rotate_limit=45, p=1)(image=mask)['image']
+
+    image = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
+    # image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
     
     return image, mask, infor
 
 def transform_valid(image, mask, infor):
     
-    # no normalization for now
-    # image = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
-    image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
+    image = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
+    # image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
 
     return image, mask, infor
 
@@ -392,20 +390,26 @@ def training(model_name,
     
     # define criterion
     criterion = BCEDiceLoss()
-    metric = FscoreMetric()
+    metric = FscoreMetric(activation=None)
     
     for epoch in range(1, num_epoch+1):
         
         # update lr and start from start_epoch  
-        if (not lr_scheduler_each_iter):
-            if epoch < 60:
-                if epoch != 0:
-                    scheduler.step()
-                    scheduler = warm_restart(scheduler, T_mult=2) 
-            elif epoch > 5 and epoch < 8:
-                optimizer.param_groups[0]['lr'] = 1e-5
-            else:
-                optimizer.param_groups[0]['lr'] = 5e-6
+        # if (not lr_scheduler_each_iter):
+        #     if epoch < 600:
+        #         if epoch != 0:
+        #             scheduler.step()
+        #             scheduler = warm_restart(scheduler, T_mult=2) 
+        #     elif epoch > 600 and epoch < 800:
+        #         optimizer.param_groups[0]['lr'] = 1e-5
+        #     else:
+        #         optimizer.param_groups[0]['lr'] = 5e-6
+                
+        affect_rate = CosineAnnealingWarmUpRestarts(epoch, T_0=num_epoch, T_warmup=15, gamma=0.8,)
+        optimizer.param_groups[0]['lr'] = affect_rate * lr
+        
+        # optimizer.param_groups[0]['lr'] = rate * lr
+        # optimizer.param_groups[1]['lr'] = rate * lr * 0.01
             
         if (epoch < start_epoch):
             continue
@@ -433,6 +437,7 @@ def training(model_name,
             X = X.cuda().float()  
             truth_mask  = truth_mask.cuda()
             prediction = model(X)  # [N, C, H, W]
+            # loss = criterion_mask(prediction, truth_mask, weight=None)
             loss = criterion(prediction, truth_mask)
 
             with amp.scale_loss(loss/accumulation_steps, optimizer) as scaled_loss:
@@ -448,12 +453,12 @@ def training(model_name,
                 writer.add_scalar('train_loss_' + str(fold), loss.item(), (epoch-1)*len(train_dataloader)*batch_size+tr_batch_i*batch_size)
             
             # print statistics  --------
-            # probability_mask  = torch.sigmoid(prediction)
-            probability_mask  = prediction
+            probability_mask  = torch.sigmoid(prediction)
+            # probability_mask  = prediction
             mask_positive = torch.where(truth_mask > 0, torch.ones_like(truth_mask), truth_mask)
             mask_negative = torch.ones_like(truth_mask) - truth_mask
             fscore_positive = metric(probability_mask, mask_positive)
-            fscore_negative = metric(probability_mask, mask_negative)
+            fscore_negative = metric(torch.ones_like(truth_mask) - probability_mask, mask_negative)
             
             l = np.array([loss.item() * batch_size, fscore_positive, fscore_negative])
             n = np.array([batch_size])
@@ -489,17 +494,18 @@ def training(model_name,
                         truth_mask  = truth_mask.cuda()
                         prediction = model(X)  # [N, C, H, W]
 
+                        # loss = criterion_mask(prediction, truth_mask, weight=None)
                         loss = criterion(prediction, truth_mask)
                             
                         writer.add_scalar('val_loss_' + str(fold), loss.item(), (eval_count-1)*len(valid_dataloader)*valid_batch_size+val_batch_i*valid_batch_size)
                         
                         # print statistics  --------
-                        # probability_mask  = torch.sigmoid(prediction)
-                        probability_mask  = prediction
+                        probability_mask  = torch.sigmoid(prediction)
+                        # probability_mask  = prediction
                         mask_positive = torch.where(truth_mask > 0, torch.ones_like(truth_mask), truth_mask)
                         mask_negative = torch.ones_like(truth_mask) - truth_mask
                         fscore_positive = metric(probability_mask, mask_positive)
-                        fscore_negative = metric(probability_mask, mask_negative)
+                        fscore_negative = metric(torch.ones_like(truth_mask) - probability_mask, mask_negative)
 
                         #---
                         l = np.array([loss.item()*valid_batch_size, fscore_positive, fscore_negative])
