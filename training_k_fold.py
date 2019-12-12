@@ -30,7 +30,7 @@ import albumentations
 from albumentations import torch as AT
 
 # import split dataset
-from generating_datase.split_data import split
+from generating_dataset.split_data import split
 
 # import dataset class
 from dataset.dataset import URESDataset
@@ -62,15 +62,15 @@ from segmentation.unet.models.model import *
 
 ############################################################################## define augument
 parser = argparse.ArgumentParser(description="arg parser")
-parser.add_argument('--model', type=str, default='seresnext101', required=False, help='specify the backbone model')
+parser.add_argument('--model', type=str, default='efficientnet-b5', required=False, help='specify the backbone model')
 parser.add_argument('--model_type', type=str, default='unet', required=False, help='specify the model')
 parser.add_argument('--optimizer', type=str, default='Ranger', required=False, help='specify the optimizer')
 parser.add_argument("--lr_scheduler", type=str, default='WarmRestart', required=False, help="specify the lr scheduler")
 parser.add_argument("--lr", type=int, default=2e-3, required=False, help="specify the initial learning rate for training")
-parser.add_argument("--batch_size", type=int, default=4, required=False, help="specify the batch size for training")
-parser.add_argument("--valid_batch_size", type=int, default=4, required=False, help="specify the batch size for validating")
+parser.add_argument("--batch_size", type=int, default=2, required=False, help="specify the batch size for training")
+parser.add_argument("--valid_batch_size", type=int, default=1, required=False, help="specify the batch size for validating")
 parser.add_argument("--num_epoch", type=int, default=15, required=False, help="specify the total epoch")
-parser.add_argument("--accumulation_steps", type=int, default=4, required=False, help="specify the accumulation steps")
+parser.add_argument("--accumulation_steps", type=int, default=2, required=False, help="specify the accumulation steps")
 parser.add_argument("--start_epoch", type=int, default=0, required=False, help="specify the start epoch for continue training")
 parser.add_argument("--train_data_folder", type=str, default="/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE", \
     required=False, help="specify the folder for training data")
@@ -145,7 +145,7 @@ def transform_train(image, mask, infor):
     
     # no normalization for now
     # image = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
-    # image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
+    image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
     
     return image, mask, infor
 
@@ -153,7 +153,7 @@ def transform_valid(image, mask, infor):
     
     # no normalization for now
     # image = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
-    # image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
+    image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
 
     return image, mask, infor
 
@@ -332,7 +332,7 @@ def training(model_name,
             WIDTH=MASK_WIDTH, HEIGHT=MASK_HEIGHT, load_pretrain=load_pretrain, checkpoint_filepath=checkpoint_filepath)
     elif model_type == 'deeplab':
         model = get_deeplab_model(model_name=model_name, in_channel=3, num_classes=NUM_CLASS, \
-            criterion=SoftDiceLoss_binary(), load_pretrain=load_pretrain, checkpoint_filepath=checkpoint_filepath)
+            criterion=BCEDiceLoss(), load_pretrain=load_pretrain, checkpoint_filepath=checkpoint_filepath)
     elif model_type == 'aspp':
         model = get_aspp_model(model_name=model_name, NUM_CLASSES=NUM_CLASS, \
             load_pretrain=load_pretrain, checkpoint_filepath=checkpoint_filepath)
@@ -390,6 +390,10 @@ def training(model_name,
     writer = SummaryWriter()
     start_timer = timer()
     
+    # define criterion
+    criterion = BCEDiceLoss()
+    metric = FscoreMetric()
+    
     for epoch in range(1, num_epoch+1):
         
         # update lr and start from start_epoch  
@@ -429,7 +433,7 @@ def training(model_name,
             X = X.cuda().float()  
             truth_mask  = truth_mask.cuda()
             prediction = model(X)  # [N, C, H, W]
-            loss = criterion_mask(prediction, truth_mask, weight=None)
+            loss = criterion(prediction, truth_mask, weight=None)
 
             with amp.scale_loss(loss/accumulation_steps, optimizer) as scaled_loss:
                 scaled_loss.backward()
@@ -445,11 +449,11 @@ def training(model_name,
             
             # print statistics  --------
             probability_mask  = torch.sigmoid(prediction)
-            probability_label = probability_mask_to_label(probability_mask)
-            dn, dp, num_neg, num_pos = metric_mask(probability_mask, truth_mask)
+            fscore_positive = metric(probability_mask, truth_mask)
+            fscore_negative = metric(probability_mask, torch.ones_like(truth_mask) - truth_mask)
             
-            l = np.array([ loss.item() * batch_size, dn.sum(), *dp ])
-            n = np.array([ batch_size, num_neg.sum(), *num_pos ])
+            l = np.array([loss.item() * batch_size, fscore_positive, fscore_negative])
+            n = np.array([batch_size])
             sum_train_loss += l
             sum_train      += n
             
@@ -458,8 +462,8 @@ def training(model_name,
                 train_loss = sum_train_loss / (sum_train + 1e-12)
                 sum_train_loss[...] = 0
                 sum_train[...]      = 0
-                log.write('lr: %f train loss: %f dn: %f dp1: %f dp2: %f dp3: %f dp4: %f\n' % \
-                    (rate, train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5]))
+                log.write('lr: %f train loss: %f fscore_positive: %f fscore_negative: %f\n' % \
+                    (rate, train_loss[0], train_loss[1], train_loss[2]))
             
 
             if (tr_batch_i+1) % eval_step == 0:  
@@ -483,42 +487,27 @@ def training(model_name,
                         prediction = model(X)  # [N, C, H, W]
 
                         #SoftDiceLoss_binary()(prediction, truth_mask)
-                        loss = criterion_mask(prediction, truth_mask, weight=None)
+                        loss = criterion(prediction, truth_mask, weight=None)
                             
                         writer.add_scalar('val_loss_' + str(fold), loss.item(), (eval_count-1)*len(valid_dataloader)*valid_batch_size+val_batch_i*valid_batch_size)
                         
                         # print statistics  --------
                         probability_mask  = torch.sigmoid(prediction)
-                        probability_label = probability_mask_to_label(probability_mask)
-                        dn, dp, num_neg, num_pos = metric_mask(probability_mask, truth_mask)
+                        fscore_positive = metric(probability_mask, truth_mask)
+                        fscore_negative = metric(probability_mask, torch.ones_like(truth_mask) - truth_mask)
 
                         #---
-                        l = np.array([ loss.item()*valid_batch_size, *tn, *tp, *dn, *dp])
-                        n = np.array([ valid_batch_size, *num_neg, *num_pos, *num_neg, *num_pos])
+                        l = np.array([loss.item()*valid_batch_size, fscore_positive, fscore_negative])
+                        n = np.array([valid_batch_size])
                         valid_loss += l
                         valid_num  += n
                         
                     valid_loss = valid_loss / valid_num
                     
-                    #------
-                    test_pos_ratio = np.array(
-                        [NUM_TEST_POS[c][0] / NUM_TEST for c in list(CLASSNAME_TO_CLASSNO.keys())]
-                    )
-                    test_neg_ratio = 1-test_pos_ratio
-
-                    tn, tp, dn, dp = valid_loss[1:].reshape(-1, NUM_CLASS)
-                    kaggle = test_neg_ratio*tn + test_neg_ratio*(1-tn)*dn + test_pos_ratio*tp*dp
-                    kaggle = kaggle.mean()
-
-                    kaggle1 = test_neg_ratio*tn + test_pos_ratio*tp
-                    kaggle1 = kaggle1.mean()
-                    
-                    log.write('kaggle value: %f validation loss: %f tn1: %f tn2: %f tn3: %f tn4: %f tp1: %f tp2: %f tp3: %f tp4: %f dn1: %f dn2: %f dn3: %f dn4: %f dp1: %f dp2: %f dp3: %f dp4: %f\n' % \
-                    (kaggle1, valid_loss[0], \
-                    valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], \
-                    valid_loss[5], valid_loss[6], valid_loss[7], valid_loss[8], \
-                    valid_loss[9], valid_loss[10], valid_loss[11], valid_loss[12], \
-                    valid_loss[13], valid_loss[14], valid_loss[15], valid_loss[16]))
+                    log.write('validation loss: %f fscore_positive: %f fscore_negative: %f\n' % \
+                    (valid_loss[0], \
+                    valid_loss[1], \
+                    valid_loss[2]))
 
 
         val_metric_epoch = valid_loss[0]
@@ -536,7 +525,10 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    split(n_splits=N_SPLITS, seed=SEED)
+    split(train_info_path='/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE/train.csv', \
+        save_path='/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE/', \
+        n_splits=N_SPLITS, \
+        seed=SEED)
     
     for fold_ in range(N_SPLITS):
         
@@ -546,4 +538,3 @@ if __name__ == "__main__":
         training(args.model, args.model_type, args.optimizer, args.lr_scheduler, args.lr, args.batch_size, args.valid_batch_size, \
                         args.num_epoch, args.start_epoch, args.accumulation_steps, args.train_data_folder, \
                         args.checkpoint_folder, train_split, val_split, fold_, args.load_pretrain)
-

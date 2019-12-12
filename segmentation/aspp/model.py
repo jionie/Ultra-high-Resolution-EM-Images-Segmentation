@@ -1,5 +1,5 @@
-from modelzoo import *
-from utils.include import *
+from .modelzoo import *
+from .utils.include import *
 
 
 ######################################################################################################333

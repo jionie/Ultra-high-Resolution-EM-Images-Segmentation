@@ -5,11 +5,11 @@ import os
 
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold, StratifiedKFold
-from ml_stratifiers import MultilabelStratifiedKFold
+from utils.ml_stratifiers import MultilabelStratifiedKFold
 
 
 parser = argparse.ArgumentParser(description="arg parser")
-parser.add_argument('--train_info_path', type=str, default='/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE/', \
+parser.add_argument('--train_info_path', type=str, default='/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE/train.csv', \
     required=False, help='specify the path for train.csv')
 parser.add_argument('--n_splits', type=int, default=5, \
     required=False, help='specify the number of folds')

@@ -117,7 +117,7 @@ class URESDataset(Dataset):
 
         image = cv2.resize(image, dsize=self.size, interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, dsize=self.size, interpolation=cv2.INTER_LINEAR)
-        mask  = mask.astype(np.float32)/255
+        mask  = 1 - mask.astype(np.float32)/255
         
         info = image_id
         
@@ -170,7 +170,31 @@ def transform_train(image, mask, info):
     # vimage = albumentations.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, p=1.0)(image=image)['image']
     # image = albumentations.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=255.0, p=1.0)(image=image)['image']
     
-    return image, mask, info      
+    return image, mask, info    
+
+def null_collate(batch):
+    batch_size = len(batch)
+
+    input = []
+    truth_mask  = []
+    for b in range(batch_size):
+        input.append(batch[b][0])
+        truth_mask.append(batch[b][1])
+
+    input = np.stack(input)
+    input = input[...,::-1].copy()
+    input = input.transpose(0,3,1,2)
+    
+    truth_mask = np.stack(truth_mask)
+    if (truth_mask.ndim < 4):   
+        truth_mask = np.expand_dims(truth_mask, axis=3)
+    truth_mask = truth_mask.transpose(0,3,1,2)
+
+    #----
+    input = torch.from_numpy(input).float()
+    truth_mask = torch.from_numpy(truth_mask).float()
+
+    return input, truth_mask
         
 if __name__ == "__main__":
     
