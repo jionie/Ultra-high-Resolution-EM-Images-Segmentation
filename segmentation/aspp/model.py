@@ -189,19 +189,19 @@ def upsize(x, scale_factor=2):
     x = F.interpolate(x, scale_factor=scale_factor, mode='nearest')
     return x
 
-
-class Net(nn.Module):
-
-    def __init__(self, name="ResNet34", num_class=4):
-        super(Net, self).__init__()
-
-        if name == "ResNet34":
+class Net_Encoder(nn.Module):
+    def __init__(self, model_name, IN_CHANNEL):
+        super(Net_Encoder, self).__init__()
+        self.model_name = model_name
+        self.down = True
+        self.startconv = nn.Conv2d(IN_CHANNEL, 3, kernel_size=1)
+        
+        if model_name == "ResNet34":
             self.basemodel = resnet34(True)
             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
-            
-        self.down = True
+            self.down = False
         
-        if name == 'seresnext50':
+        if model_name == 'seresnext50':
             self.basemodel = se_resnext50_32x4d(pretrained='imagenet')
             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
             inplanes = 64
@@ -228,16 +228,16 @@ class Net(nn.Module):
             self.down3 = nn.Conv2d(1024, self.planes[2], kernel_size=1)
             self.down4 = nn.Conv2d(2048, self.planes[3], kernel_size=1)
             
-        if name == 'seresnext26':
+        if model_name == 'seresnext26':
             self.basemodel = seresnext26_32x4d(pretrained=True)
             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
 
             self.down1 = nn.Conv2d(256, self.planes[0], kernel_size=1)
             self.down2 = nn.Conv2d(512, self.planes[1], kernel_size=1)
             self.down3 = nn.Conv2d(1024, self.planes[2], kernel_size=1)
             self.down4 = nn.Conv2d(2048, self.planes[3], kernel_size=1)
-        if name == 'seresnext101':
+            
+        if model_name == 'seresnext101':
             self.basemodel = se_resnext101_32x4d(pretrained='imagenet')
             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
             inplanes = 64
@@ -264,8 +264,7 @@ class Net(nn.Module):
             self.down3 = nn.Conv2d(1024, self.planes[2], kernel_size=1)
             self.down4 = nn.Conv2d(2048, self.planes[3], kernel_size=1)
         
-        if name == 'dpn68':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'dpn68':
             self.basemodel = dpn68(pretrained=True)
 
             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
@@ -274,46 +273,96 @@ class Net(nn.Module):
             self.down3 = nn.Conv2d(704, self.planes[2], kernel_size=1)
             self.down4 = nn.Conv2d(832, self.planes[3], kernel_size=1)
             
-        if name == 'efficientnet-b7':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'efficientnet-b7':
             self.basemodel = EfficientNet.from_pretrained('efficientnet-b7')
             self.planes = [48, 48, 80, 160]
             self.down = False
             
-        if name == 'efficientnet-b5':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'efficientnet-b5':
             self.basemodel = EfficientNet.from_pretrained('efficientnet-b5')
             self.planes = [40, 40, 128, 176]
             self.down = False
             
-        if name == 'efficientnet-b4':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'efficientnet-b4':
             self.basemodel = EfficientNet.from_pretrained('efficientnet-b4')
             self.planes = [32, 56, 112, 272]
             self.down = False
 
-        if name == 'efficientnet-b3':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'efficientnet-b3':
             self.basemodel = EfficientNet.from_pretrained('efficientnet-b3')
 
             self.planes = [32, 48, 136, 232]
             self.down = False
 
-        if name == 'efficientnet-b2':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'efficientnet-b2':
             self.basemodel = EfficientNet.from_pretrained('efficientnet-b2')
 
             self.planes = [24, 48, 120, 352]
             self.down = False
 
-        if name == 'efficientnet-b1':
-            self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+        if model_name == 'efficientnet-b1':
             self.basemodel = EfficientNet.from_pretrained('efficientnet-b1')
 
             self.planes = [24, 40, 112, 320]
             self.down = False
-            
         
+    def forward(self, x):
+        if self.model_name in ['dpn68', 'seresnext26', 'efficientnet-b5', 'efficientnet-b3', 'efficientnet-b2', 'efficientnet-b1', 'efficientnet-b7']:
+            x = self.startconv(x)
+            
+        x1, x2, x3, x4 = self.basemodel(x)
+        
+        if self.down:
+            x1 = self.down1(x1)
+            x2 = self.down2(x2)
+            x3 = self.down3(x3)
+            x4 = self.down4(x4)
+            
+        return x1, x2, x3, x4
+    
+    
+    
+class Net_Decoder(nn.Module):
+    def __init__(self, model_name, NUM_CLASSES, WIDTH, HEIGT):
+        super(Net_Decoder, self).__init__()
+        self.model_name = model_name
+        self.WIDTH = WIDTH
+        self.HEIGT = HEIGT
+        
+        if model_name == "ResNet34":
+            self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+        
+        if model_name == 'seresnext50':
+            self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+            
+        if model_name == 'seresnext26':
+            self.startconv = nn.Conv2d(IN_CHANNEL, 3, kernel_size=1)
+            self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+            
+        if model_name == 'seresnext101':
+            self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+        
+        if model_name == 'dpn68':
+            self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+            
+        if model_name == 'efficientnet-b7':
+            self.planes = [48, 48, 80, 160]
+            
+        if model_name == 'efficientnet-b5':
+            self.planes = [40, 40, 128, 176]
+            
+        if model_name == 'efficientnet-b4':
+            self.planes = [32, 56, 112, 272]
+
+        if model_name == 'efficientnet-b3':
+            self.planes = [32, 48, 136, 232]
+
+        if model_name == 'efficientnet-b2':
+            self.planes = [24, 48, 120, 352]
+
+        if model_name == 'efficientnet-b1':
+            self.planes = [24, 40, 112, 320]
+            
         self.Upsample = nn.Sequential(
             ConvGnUp2d(128, 128),
             ConvGnUp2d(128, 64),
@@ -322,30 +371,193 @@ class Net(nn.Module):
         self.jpu = JointPyramidUpsample([self.planes[3], self.planes[2], self.planes[1], self.planes[0]], self.planes[0])
         self.aspp = ASPP(self.planes[0] * 4, 128, rate=[4, 8, 12], dropout_rate=0.1)
         self.logit = nn.Conv2d(64, num_class, kernel_size=1)
-
-
-    def forward(self, x):
-        batch_size, C, H, W = x.shape
-        x = F.pad(x,[18,18,2,2],mode='constant', value=0) #pad = (left, right, top, down)
-        x1, x2, x3, x4 = self.basemodel(x)
-        # print(x1.shape, x2.shape, x3.shape, x4.shape)
         
-        if self.down:
-            x1 = self.down1(x1)
-            x2 = self.down2(x2)
-            x3 = self.down3(x3)
-            x4 = self.down4(x4)
+    def forward(self, x):
         
         x = self.jpu([x4, x3, x2, x1])
         x = self.aspp(x)
         x = self.Upsample(x)
-        logit = self.logit(x)
-        logit = self.logit(x)[:,:,1:350+1,10:525+10]
+        logit = self.logit(x)[:, :, 1 : self.WIDTH + 1, 10 : self.HEIGHT + 10]
 
         #---
+        # logit = self.logit(x)
         # probability_mask  = torch.sigmoid(logit)
         # probability_label = F.adaptive_max_pool2d(probability_mask,1).view(batch_size,-1)
         
         return logit
+    
+    
+    
+class Net(nn.Module):
+    def __init__(self, model_name, IN_CHANNEL, NUM_CLASSES, WIDTH, HEIGT):
+        super(Net, self).__init__()
+        self.model_name = model_name
+        self.encoder = Net_Encoder(model_name, IN_CHANNEL)
+        self.decoder = Net_Decoder(model_name, NUM_CLASSES, WIDTH, HEIGT)
+        
+    def forward(self, x):
+        x1, x2, x3, x4 = self.encoder(x)
+        result = self.decoder(x1, x2, x3, x4)
+        
+        return result
+
+
+# class Net(nn.Module):
+
+#     def __init__(self, model_name="ResNet34", num_class=4):
+#         super(Net, self).__init__()
+
+#         if model_name == "ResNet34":
+#             self.basemodel = resnet34(True)
+#             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+            
+#         self.down = True
+        
+#         if model_name == 'seresnext50':
+#             self.basemodel = se_resnext50_32x4d(pretrained='imagenet')
+#             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+#             inplanes = 64
+#             layer0_modules = [
+#                 ('conv1', nn.Conv2d(3, 64, 3, stride=2, padding=1,
+#                                     bias=False)),
+#                 ('bn1', nn.BatchNorm2d(64)),
+#                 ('relu1', nn.ReLU(inplace=True)),
+#                 ('conv2', nn.Conv2d(64, 64, 3, stride=1, padding=1,
+#                                     bias=False)),
+#                 ('bn2', nn.BatchNorm2d(64)),
+#                 ('relu2', nn.ReLU(inplace=True)),
+#                 ('conv3', nn.Conv2d(64, inplanes, 3, stride=1, padding=1,
+#                                     bias=False)),
+#                 ('bn3', nn.BatchNorm2d(inplanes)),
+#                 ('relu3', nn.ReLU(inplace=True)),
+#             ]
+#             layer0_modules.append(('pool', nn.MaxPool2d(3, stride=2,
+#                                                         ceil_mode=True)))
+#             self.basemodel.layer0 = nn.Sequential(OrderedDict(layer0_modules))
+
+#             self.down1 = nn.Conv2d(256, self.planes[0], kernel_size=1)
+#             self.down2 = nn.Conv2d(512, self.planes[1], kernel_size=1)
+#             self.down3 = nn.Conv2d(1024, self.planes[2], kernel_size=1)
+#             self.down4 = nn.Conv2d(2048, self.planes[3], kernel_size=1)
+            
+#         if model_name == 'seresnext26':
+#             self.basemodel = seresnext26_32x4d(pretrained=True)
+#             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+
+#             self.down1 = nn.Conv2d(256, self.planes[0], kernel_size=1)
+#             self.down2 = nn.Conv2d(512, self.planes[1], kernel_size=1)
+#             self.down3 = nn.Conv2d(1024, self.planes[2], kernel_size=1)
+#             self.down4 = nn.Conv2d(2048, self.planes[3], kernel_size=1)
+#         if model_name == 'seresnext101':
+#             self.basemodel = se_resnext101_32x4d(pretrained='imagenet')
+#             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+#             inplanes = 64
+#             layer0_modules = [
+#                 ('conv1', nn.Conv2d(3, 64, 3, stride=2, padding=1,
+#                                     bias=False)),
+#                 ('bn1', nn.BatchNorm2d(64)),
+#                 ('relu1', nn.ReLU(inplace=True)),
+#                 ('conv2', nn.Conv2d(64, 64, 3, stride=1, padding=1,
+#                                     bias=False)),
+#                 ('bn2', nn.BatchNorm2d(64)),
+#                 ('relu2', nn.ReLU(inplace=True)),
+#                 ('conv3', nn.Conv2d(64, inplanes, 3, stride=1, padding=1,
+#                                     bias=False)),
+#                 ('bn3', nn.BatchNorm2d(inplanes)),
+#                 ('relu3', nn.ReLU(inplace=True)),
+#             ]
+#             layer0_modules.append(('pool', nn.MaxPool2d(3, stride=2,
+#                                                         ceil_mode=True)))
+#             self.basemodel.layer0 = nn.Sequential(OrderedDict(layer0_modules))
+
+#             self.down1 = nn.Conv2d(256, self.planes[0], kernel_size=1)
+#             self.down2 = nn.Conv2d(512, self.planes[1], kernel_size=1)
+#             self.down3 = nn.Conv2d(1024, self.planes[2], kernel_size=1)
+#             self.down4 = nn.Conv2d(2048, self.planes[3], kernel_size=1)
+        
+#         if model_name == 'dpn68':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = dpn68(pretrained=True)
+
+#             self.planes = [256 // 4, 512 // 4, 1024 // 4, 2048 // 4]
+#             self.down1 = nn.Conv2d(144, self.planes[0], kernel_size=1)
+#             self.down2 = nn.Conv2d(320, self.planes[1], kernel_size=1)
+#             self.down3 = nn.Conv2d(704, self.planes[2], kernel_size=1)
+#             self.down4 = nn.Conv2d(832, self.planes[3], kernel_size=1)
+            
+#         if model_name == 'efficientnet-b7':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = EfficientNet.from_pretrained('efficientnet-b7')
+#             self.planes = [48, 48, 80, 160]
+#             self.down = False
+            
+#         if model_name == 'efficientnet-b5':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = EfficientNet.from_pretrained('efficientnet-b5')
+#             self.planes = [40, 40, 128, 176]
+#             self.down = False
+            
+#         if model_name == 'efficientnet-b4':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = EfficientNet.from_pretrained('efficientnet-b4')
+#             self.planes = [32, 56, 112, 272]
+#             self.down = False
+
+#         if model_name == 'efficientnet-b3':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = EfficientNet.from_pretrained('efficientnet-b3')
+
+#             self.planes = [32, 48, 136, 232]
+#             self.down = False
+
+#         if model_name == 'efficientnet-b2':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = EfficientNet.from_pretrained('efficientnet-b2')
+
+#             self.planes = [24, 48, 120, 352]
+#             self.down = False
+
+#         if model_name == 'efficientnet-b1':
+#             self.startconv = nn.Conv2d(3, 3, kernel_size=1)
+#             self.basemodel = EfficientNet.from_pretrained('efficientnet-b1')
+
+#             self.planes = [24, 40, 112, 320]
+#             self.down = False
+            
+        
+#         self.Upsample = nn.Sequential(
+#             ConvGnUp2d(128, 128),
+#             ConvGnUp2d(128, 64),
+#         )
+
+#         self.jpu = JointPyramidUpsample([self.planes[3], self.planes[2], self.planes[1], self.planes[0]], self.planes[0])
+#         self.aspp = ASPP(self.planes[0] * 4, 128, rate=[4, 8, 12], dropout_rate=0.1)
+#         self.logit = nn.Conv2d(64, num_class, kernel_size=1)
+
+
+#     def forward(self, x):
+#         batch_size, C, H, W = x.shape
+#         x = F.pad(x,[18,18,2,2],mode='constant', value=0) #pad = (left, right, top, down)
+#         x1, x2, x3, x4 = self.basemodel(x)
+#         # print(x1.shape, x2.shape, x3.shape, x4.shape)
+        
+#         if self.down:
+#             x1 = self.down1(x1)
+#             x2 = self.down2(x2)
+#             x3 = self.down3(x3)
+#             x4 = self.down4(x4)
+        
+#         x = self.jpu([x4, x3, x2, x1])
+#         x = self.aspp(x)
+#         x = self.Upsample(x)
+#         logit = self.logit(x)
+#         logit = self.logit(x)[:,:,1:350+1,10:525+10]
+
+#         #---
+#         # probability_mask  = torch.sigmoid(logit)
+#         # probability_label = F.adaptive_max_pool2d(probability_mask,1).view(batch_size,-1)
+        
+#         return logit
 
 

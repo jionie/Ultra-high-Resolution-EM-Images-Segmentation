@@ -119,6 +119,8 @@ class URESDataset(Dataset):
         image = cv2.resize(image, dsize=self.size, interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, dsize=self.size, interpolation=cv2.INTER_LINEAR)
         mask  = 1 - mask.astype(np.float32)/255
+        mask = np.where(mask > 0, 1, 0)
+        # mask = mask.astype(np.float32)/255
         # print(image)
         # print(mask.shape)
         

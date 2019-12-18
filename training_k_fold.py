@@ -10,6 +10,8 @@ import cv2
 from PIL import Image
 import numpy as np
 from functools import partial
+from sklearn.metrics import f1_score
+
 
 # import pytorch related libraries
 import torch
@@ -62,15 +64,15 @@ from segmentation.unet.models.model import *
 
 ############################################################################## define augument
 parser = argparse.ArgumentParser(description="arg parser")
-parser.add_argument('--model', type=str, default='efficientnet-b3', required=False, help='specify the backbone model')
-parser.add_argument('--model_type', type=str, default='unet', required=False, help='specify the model')
+parser.add_argument('--model', type=str, default='deep_se50', required=False, help='specify the backbone model')
+parser.add_argument('--model_type', type=str, default='deeplab', required=False, help='specify the model')
 parser.add_argument('--optimizer', type=str, default='Adam', required=False, help='specify the optimizer')
 parser.add_argument("--lr_scheduler", type=str, default='WarmRestart', required=False, help="specify the lr scheduler")
-parser.add_argument("--lr", type=int, default=2e-3, required=False, help="specify the initial learning rate for training")
+parser.add_argument("--lr", type=int, default=5e-4, required=False, help="specify the initial learning rate for training")
 parser.add_argument("--batch_size", type=int, default=2, required=False, help="specify the batch size for training")
 parser.add_argument("--valid_batch_size", type=int, default=2, required=False, help="specify the batch size for validating")
-parser.add_argument("--num_epoch", type=int, default=1000, required=False, help="specify the total epoch")
-parser.add_argument("--accumulation_steps", type=int, default=12, required=False, help="specify the accumulation steps")
+parser.add_argument("--num_epoch", type=int, default=600, required=False, help="specify the total epoch")
+parser.add_argument("--accumulation_steps", type=int, default=4, required=False, help="specify the accumulation steps")
 parser.add_argument("--start_epoch", type=int, default=0, required=False, help="specify the start epoch for continue training")
 parser.add_argument("--train_data_folder", type=str, default="/media/jionie/my_disk/Kaggle/URES/input/URES/U-RISC OPEN DATA SIMPLE/U-RISC OPEN DATA SIMPLE", \
     required=False, help="specify the folder for training data")
@@ -120,12 +122,12 @@ def transform_train(image, mask, infor):
     #         albumentations.CLAHE(clip_limit=4.0, tile_grid_size=(4, 4), p=0.1),
     #     ])(image=image)['image']
     
-    if random.random() < 0.25:  
-        image = albumentations.OneOf([
-            albumentations.Blur(blur_limit=4, p=1),
-            albumentations.MotionBlur(blur_limit=4, p=1),
-            albumentations.MedianBlur(blur_limit=4, p=1)
-        ], p=0.5)(image=image)['image']
+    # if random.random() < 0.25:  
+    #     image = albumentations.OneOf([
+    #         albumentations.Blur(blur_limit=4, p=1),
+    #         albumentations.MotionBlur(blur_limit=4, p=1),
+    #         albumentations.MedianBlur(blur_limit=4, p=1)
+    #     ], p=0.5)(image=image)['image']
 
     if random.random() < 0.25:
         image = albumentations.Cutout(num_holes=2, max_h_size=8, max_w_size=8, p=1)(image=image)['image']
@@ -312,7 +314,7 @@ def training(model_name,
     
     def get_aspp_model(model_name="efficientnet-b3", NUM_CLASSES=1, load_pretrain=False, checkpoint_filepath=None):
         
-        model = Net(model_name, NUM_CLASSES)
+        model = Net(model_name, IN_CHANNEL, NUM_CLASSES, WIDTH, HEIGHT)
         if (load_pretrain):
             state_dict = torch.load(checkpoint_filepath, map_location=lambda storage, loc: storage)
         model.load_state_dict(state_dict, strict=True)
@@ -338,7 +340,13 @@ def training(model_name,
     model = model.cuda()
     
     if optimizer_name == "Adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        if model_type != 'deeplab':
+            optimizer = torch.optim.Adam([
+                {'params': model.decoder.parameters(), 'lr': lr, 'weight_decay': 0.01}, 
+                {'params': model.encoder.parameters(), 'lr': lr * 0.05}
+            ])
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     elif optimizer_name == "adamonecycle":
         flatten_model = lambda m: sum(map(flatten_model, m.children()), []) if num_children(m) else [m]
         get_layer_groups = lambda m: [nn.Sequential(*flatten_model(m))]
@@ -348,7 +356,13 @@ def training(model_name,
             optimizer_func, 3e-3, get_layer_groups(model), wd=1e-4, true_wd=True, bn_wd=True
         )
     elif optimizer_name == "Ranger":
-        optimizer = Ranger(filter(lambda p: p.requires_grad, model.parameters()), lr, weight_decay=1e-5)
+        if model_type != 'deeplab':
+            optimizer = Ranger([
+                {'params': model.decoder.parameters(), 'lr': lr, 'weight_decay': 0.01}, 
+                {'params': model.encoder.parameters(), 'lr': lr * 0.05}
+            ])
+        else:
+            optimizer = Ranger(filter(lambda p: p.requires_grad, model.parameters()), lr, weight_decay=1e-5)
     else:
         raise NotImplementedError
     
@@ -394,6 +408,8 @@ def training(model_name,
     
     for epoch in range(1, num_epoch+1):
         
+        torch.cuda.empty_cache()
+        
         # update lr and start from start_epoch  
         # if (not lr_scheduler_each_iter):
         #     if epoch < 600:
@@ -408,6 +424,14 @@ def training(model_name,
         affect_rate = CosineAnnealingWarmUpRestarts(epoch, T_0=num_epoch, T_warmup=15, gamma=0.8,)
         optimizer.param_groups[0]['lr'] = affect_rate * lr
         
+        if epoch < 100:
+            optimizer.param_groups[0]['lr'] = affect_rate * lr
+        elif epoch < 150:
+            lr = 4e-4
+            optimizer.param_groups[0]['lr'] = affect_rate * lr
+        else:
+            lr = 1e-4 
+        
         # optimizer.param_groups[0]['lr'] = rate * lr
         # optimizer.param_groups[1]['lr'] = rate * lr * 0.01
             
@@ -416,7 +440,7 @@ def training(model_name,
         
         log.write("Epoch%s\n" % epoch)
         log.write('\n')
-        
+            
         for param_group in optimizer.param_groups:
             rate = param_group['lr']
 
@@ -453,12 +477,21 @@ def training(model_name,
                 writer.add_scalar('train_loss_' + str(fold), loss.item(), (epoch-1)*len(train_dataloader)*batch_size+tr_batch_i*batch_size)
             
             # print statistics  --------
-            probability_mask  = torch.sigmoid(prediction)
+
             # probability_mask  = prediction
-            mask_positive = torch.where(truth_mask > 0, torch.ones_like(truth_mask), truth_mask)
-            mask_negative = torch.ones_like(truth_mask) - truth_mask
+            probability_mask  = torch.sigmoid(prediction)
+            mask_positive = torch.where(truth_mask > 0.5, torch.ones_like(truth_mask), truth_mask)
+            mask_negative = 1 - mask_positive
             fscore_positive = metric(probability_mask, mask_positive)
-            fscore_negative = metric(torch.ones_like(truth_mask) - probability_mask, mask_negative)
+            fscore_negative = metric(1 - probability_mask, mask_negative)
+            
+            # probability_mask  = torch.sigmoid(prediction)
+            # mask_positive = np.where(truth_mask.clone().detach().cpu().numpy().flatten() > 0, 1, 0)
+            # mask_negative = 1 - mask_positive
+            # mask_pred_positive = np.where(probability_mask.detach().clone().cpu().numpy().flatten() > 0.5, 1, 0)
+            # mask_pred_negative = 1 - mask_pred_positive
+            # fscore_positive = f1_score(mask_positive, mask_pred_positive)
+            # fscore_negative = f1_score(mask_negative, mask_pred_negative)
             
             l = np.array([loss.item() * batch_size, fscore_positive, fscore_negative])
             n = np.array([batch_size])
@@ -500,12 +533,27 @@ def training(model_name,
                         writer.add_scalar('val_loss_' + str(fold), loss.item(), (eval_count-1)*len(valid_dataloader)*valid_batch_size+val_batch_i*valid_batch_size)
                         
                         # print statistics  --------
-                        probability_mask  = torch.sigmoid(prediction)
+
                         # probability_mask  = prediction
-                        mask_positive = torch.where(truth_mask > 0, torch.ones_like(truth_mask), truth_mask)
-                        mask_negative = torch.ones_like(truth_mask) - truth_mask
+                        probability_mask  = torch.sigmoid(prediction)
+                        mask_positive = torch.where(truth_mask > 0.5, torch.ones_like(truth_mask), truth_mask)
+                        mask_negative = 1 - mask_positive
                         fscore_positive = metric(probability_mask, mask_positive)
-                        fscore_negative = metric(torch.ones_like(truth_mask) - probability_mask, mask_negative)
+                        fscore_negative = metric(1 - probability_mask, mask_negative)
+                        
+                        # if (epoch == 1) and (val_batch_i == 0):
+                        #     predict = probability_mask[0, :, :].detach().squeeze().cpu().numpy()
+                        #     predict = predict > 0.5 # Threshould
+                        #     predict = (1 - predict)*255
+                        #     cv2.imwrite('result/0_0.tiff', predict.astype(np.uint8))
+                        
+                        # probability_mask  = torch.sigmoid(prediction)
+                        # mask_positive = np.where(truth_mask.clone().detach().cpu().numpy().flatten() > 0, 1, 0)
+                        # mask_negative = 1 - mask_positive
+                        # mask_pred_positive = np.where(probability_mask.detach().clone().cpu().numpy().flatten() > 0.5, 1, 0)
+                        # mask_pred_negative = 1 - mask_pred_positive
+                        # fscore_positive = f1_score(mask_positive, mask_pred_positive)
+                        # fscore_negative = f1_score(mask_negative, mask_pred_negative)
 
                         #---
                         l = np.array([loss.item()*valid_batch_size, fscore_positive, fscore_negative])
